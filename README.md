@@ -2,8 +2,6 @@
 
 A macOS menu bar app that makes the Microsoft Surface Dial fully functional on macOS — volume control, scrolling, app-specific shortcuts, haptic feedback, a radial overlay menu, and per-app custom menus.
 
-No Xcode required. Built with Swift Package Manager.
-
 ---
 
 ## Requirements
