@@ -14,6 +14,7 @@
 import IOKit
 import IOKit.hid
 import Foundation
+import OSLog
 
 // MARK: - SurfaceDialDriver
 
@@ -80,8 +81,9 @@ final class SurfaceDialDriver: DialDevice, HapticDialDevice {
         // Device-removed callback.
         IOHIDManagerRegisterDeviceRemovalCallback(manager, { context, _, _, _ in
             guard let context else { return }
-            Unmanaged<SurfaceDialDriver>.fromOpaque(context).takeUnretainedValue()
-                .continuation?.yield(.disconnected)
+            let driver = Unmanaged<SurfaceDialDriver>.fromOpaque(context).takeUnretainedValue()
+            Log.device.warning("Surface Dial disconnected")
+            driver.continuation?.yield(.disconnected)
         }, selfPtr)
 
         IOHIDManagerScheduleWithRunLoop(
@@ -89,8 +91,10 @@ final class SurfaceDialDriver: DialDevice, HapticDialDevice {
 
         let result = IOHIDManagerOpen(manager, IOOptionBits(kIOHIDOptionsTypeNone))
         guard result == kIOReturnSuccess else {
+            Log.device.error("IOHIDManagerOpen failed: IOReturn 0x\(String(UInt32(bitPattern: result), radix: 16))")
             throw DialDriverError.openFailed(result)
         }
+        Log.device.info("HID manager opened — scanning for Surface Dial (VID 0x\(String(self.vendorID, radix: 16)) / PID 0x\(String(self.productID, radix: 16)))")
     }
 
     // MARK: - disconnect
@@ -127,7 +131,7 @@ final class SurfaceDialDriver: DialDevice, HapticDialDevice {
             let multiplier = Int(IOHIDValueGetIntegerValue(valueRef.takeRetainedValue()))
             if multiplier > 0 {
                 resolution = multiplier
-                print("Device resolution: \(multiplier) ticks/revolution")
+                Log.device.info("Resolution Multiplier: \(multiplier) ticks/revolution")
                 return
             }
         }
@@ -137,7 +141,9 @@ final class SurfaceDialDriver: DialDevice, HapticDialDevice {
 
     private func deviceMatched(_ device: IOHIDDevice) {
         hidDevice = device
+        Log.device.info("Surface Dial matched — reading resolution multiplier")
         readResolutionMultiplier(from: device)
+        Log.device.info("Surface Dial connected (resolution: \(self.resolution) ticks/rev)")
         continuation?.yield(.connected)
 
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
@@ -162,16 +168,21 @@ final class SurfaceDialDriver: DialDevice, HapticDialDevice {
         // Byte 0: report ID (ignored)
         // Byte 1: button state — bit 0 = pressed
         // Bytes 2–3: rotation delta as signed Int16, little-endian
-        guard length >= 4 else { return }
+        guard length >= 4 else {
+            Log.device.warning("Short HID report (\(length) bytes) — ignoring")
+            return
+        }
 
         let buttonPressed = (report[1] & 0x01) != 0
         if buttonPressed != lastButtonState {
             lastButtonState = buttonPressed
+            Log.device.debug("Button \(buttonPressed ? "pressed" : "released")")
             continuation?.yield(buttonPressed ? .pressed : .released)
         }
 
         let delta = Int16(bitPattern: UInt16(report[2]) | (UInt16(report[3]) << 8))
         if delta != 0 {
+            Log.device.debug("Rotation delta: \(delta) ticks")
             continuation?.yield(.rotated(delta: Int(delta)))
         }
     }

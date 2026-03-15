@@ -40,6 +40,12 @@ final class MenuBarController {
     /// Called when the user toggles haptics.
     var onHapticsToggle: ((Bool) -> Void)?
 
+    /// Called when the user clicks "Preferences…".
+    var onOpenPreferences: (() -> Void)?
+
+    /// URL of the config file opened by "Open Config File".
+    var configFileURL: URL?
+
     // MARK: - Private
 
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -58,6 +64,16 @@ final class MenuBarController {
 
     func setAccessibilityGranted(_ granted: Bool) {
         updateIcon(accessibilityGranted: granted)
+    }
+
+    /// Shows a disconnected badge on the menu bar icon.
+    func setDisconnected() {
+        guard let button = statusItem.button else { return }
+        if let img = NSImage(systemSymbolName: "dial.medium", accessibilityDescription: "DialKit") {
+            img.isTemplate = true
+            button.image = img
+        }
+        button.title = " ⊗"
     }
 
     // MARK: - Private — icon
@@ -110,6 +126,20 @@ final class MenuBarController {
 
         menu.addItem(.separator())
 
+        // Preferences
+        let prefs = NSMenuItem(title: "Preferences…", action: #selector(openPreferences), keyEquivalent: ",")
+        prefs.target = self
+        menu.addItem(prefs)
+
+        menu.addItem(.separator())
+
+        // Open Config File
+        let openConfig = NSMenuItem(title: "Open Config File", action: #selector(openConfigFile), keyEquivalent: "")
+        openConfig.target = self
+        menu.addItem(openConfig)
+
+        menu.addItem(.separator())
+
         // About
         let about = NSMenuItem(title: "About DialKit", action: #selector(showAbout), keyEquivalent: "")
         about.target = self
@@ -153,6 +183,15 @@ final class MenuBarController {
     @objc private func toggleHaptics() {
         hapticsEnabled.toggle()
         onHapticsToggle?(hapticsEnabled)
+    }
+
+    @objc private func openPreferences() {
+        onOpenPreferences?()
+    }
+
+    @objc private func openConfigFile() {
+        guard let url = configFileURL else { return }
+        NSWorkspace.shared.open(url)
     }
 
     @objc private func showAbout() {

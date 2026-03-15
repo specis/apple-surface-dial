@@ -1,6 +1,6 @@
 # DialKit
 
-A macOS menu bar app that makes the Microsoft Surface Dial fully functional on macOS — volume control, scrolling, app-specific shortcuts, haptic feedback, and a radial overlay menu.
+A macOS menu bar app that makes the Microsoft Surface Dial fully functional on macOS — volume control, scrolling, app-specific shortcuts, haptic feedback, a radial overlay menu, and per-app custom menus.
 
 No Xcode required. Built with Swift Package Manager.
 
@@ -25,7 +25,7 @@ DialKit requires two system permissions:
 
 On first run, DialKit will prompt for Accessibility access. Input Monitoring is requested automatically by IOKit when the HID manager opens. Grant both in **System Settings → Privacy & Security**.
 
-If Accessibility is not granted, a `⚠` badge appears on the menu bar icon.
+If Accessibility is not granted, a `⚠` badge appears on the menu bar icon. Scroll still works without it; keystroke shortcuts require it.
 
 ---
 
@@ -48,6 +48,74 @@ swift build -c release --arch arm64 --arch x86_64
 
 ---
 
+## Features
+
+### Dial modes
+
+Three operating modes, switchable from the menu bar or the radial overlay:
+
+| Mode | Rotate | Tap |
+|---|---|---|
+| **Volume** | Adjust system volume. HUD shows current level. | — |
+| **Scroll** | Scroll the window under the cursor (natural or inverted). | — |
+| **Shortcuts** | Fire configurable key combos per app profile. | Fire press-action shortcut. |
+
+### Per-app profiles
+
+DialKit watches the frontmost application and automatically switches mode and behaviour when you move between apps. Profiles are defined in `~/.config/dialkit/profiles.json`.
+
+Built-in profiles:
+
+| App | Mode | Rotate | Tap |
+|---|---|---|---|
+| Safari | Scroll | Scroll page | — |
+| Apple Music | Shortcuts | Previous / Next track | Play/Pause |
+| VSCode | Shortcuts | Previous / Next tab | Quick Open |
+| Everything else | Volume | Adjust volume | — |
+
+App-profile modes are **temporary** — switching to an unprofiled app reverts to whichever mode you last manually selected.
+
+### Radial overlay menu
+
+Hold the dial button for 200ms to open the radial menu. Rotate to highlight a segment, release to commit.
+
+- Default layout: **Scroll / Volume / Shortcuts**
+- Apps with `overlaySegments` in their profile get a **custom menu** — Apple Music shows ⏮ / ⏯ / ⏭, VSCode shows Prev Tab / Quick Open / Next Tab
+- Centre disc shows the active app name
+- Menu auto-dismisses after 3 seconds of inactivity
+- Committing a custom segment fires its shortcuts directly
+
+### Haptic feedback
+
+Haptic output via HID output reports to the Surface Dial's SimpleHapticsController:
+
+| Event | Haptic |
+|---|---|
+| Rotation step | Click (detent) |
+| Menu open | Soft click |
+| Menu close | Soft click |
+| Mode switch | Buzz |
+| Shortcut fired | Double click |
+| Volume boundary (0% / 100%) | Strong buzz |
+
+Haptics can be toggled from the menu bar and are fully configurable per-event in `profiles.json`.
+
+### Reconnect
+
+The dial reconnects automatically when it wakes from sleep or comes back in range. The menu bar icon shows a `⊗` badge while disconnected and clears when the device is found again.
+
+### Preferences
+
+A GUI preferences window (⌘,) covers the most common settings without touching JSON:
+
+- **General** — default mode, hold threshold (100–500ms), steps per rotation (10–40)
+- **Haptics** — master toggle, per-event intensity sliders
+- **App Profiles** — add/remove per-app profiles and set their mode
+
+All changes write through to `profiles.json` immediately and take effect without restarting.
+
+---
+
 ## How It Works
 
 ```
@@ -57,16 +125,22 @@ Surface Dial (Bluetooth LE HID)
   SurfaceDialDriver        — IOHIDManager, parses button + rotation bytes
         │ DialEvent stream
         ▼
-  InputInterpreter         — hold detection (200ms), tick accumulation, step normalisation
+  InputInterpreter         — hold detection, tick accumulation, step normalisation
         │ ActionEvent stream
         ▼
-  ActionEventBus           — fan-out to all subscribers
+  ActionEventBus           — fan-out AsyncStream to all subscribers
         │
-   ┌────┴────┐
-   ▼         ▼
-VolumeAction  (more actions coming)
-HapticEngine
-MenuBarController
+   ┌────┼──────────────┐
+   ▼    ▼              ▼
+ModeRouter        OverlayController
+   │                   │
+   ├─ ScrollAction      └─ RadialMenuView (CoreGraphics)
+   ├─ VolumeAction
+   └─ ShortcutAction
+
+SurfaceDialHapticEngine    — HID output reports (Page 0x0E)
+MenuBarController          — NSStatusItem + NSMenu
+ValueHUDController         — frosted-glass live-value HUD
 ```
 
 ### Input reports
@@ -81,18 +155,22 @@ The Surface Dial sends 9-byte HID reports at Report ID 1:
 | 6–7 | Y position | Physical position (Surface Hub only) |
 | 8 | Physical size | Constant — dial radius in device units |
 
-The device reports **36 ticks per revolution** (read dynamically from the Resolution Multiplier feature element at connect time). Each tick represents approximately 10° of physical rotation.
+Resolution is read dynamically from the device's Resolution Multiplier feature element at connect time (`ticksPerStep` adjusts automatically).
 
-### Hold gesture
+### Hold gesture state machine
 
-- Press and hold for **200ms** → opens radial menu (`.holdConfirmed`)
-- Press and release before 200ms → tap (`.tap`)
-- While menu is open, rotate to select a segment, release to commit
-- Menu auto-dismisses after **3 seconds** of inactivity
+```
+Idle → [pressed]            → Held (start hold timer)
+Held → [released]           → Idle (emit .tap)
+Held → [timer fires]        → MenuOpen (emit .holdConfirmed)
+MenuOpen → [rotated]        → emit .menuRotated
+MenuOpen → [released]       → emit .menuCommit(segmentIndex)
+MenuOpen → [3s inactivity]  → emit .menuDismiss
+```
 
-### Haptics
+### Haptic output
 
-Haptic output uses HID Report ID 1 (output type) on the SimpleHapticsController collection (HID Page `0x0E`). The 4-byte report layout:
+HID output report on the SimpleHapticsController collection (Page `0x0E`):
 
 | Byte | Field | Value |
 |---|---|---|
@@ -102,20 +180,61 @@ Haptic output uses HID Report ID 1 (output type) on the SimpleHapticsController 
 
 ---
 
-## Features
+## Configuration
 
-### Currently working
+Config lives at `~/.config/dialkit/profiles.json`. It is created with sensible defaults on first run and reloaded live whenever you save it — no restart needed.
 
-- **Volume control** — rotate to adjust system volume. Uses CoreAudio virtual main volume with fallback to per-channel scalar and media key simulation (required on Apple Silicon built-in audio)
-- **Haptic feedback** — detent click on rotation, distinct patterns for menu open/close and mode switch
-- **Hold gesture** — 200ms hold detection with tap/hold disambiguation
-- **Menu bar icon** — `dial.medium` SF Symbol with mode label, mode switcher submenu, haptics toggle, and Quit
-- **Dynamic resolution** — reads the device's Resolution Multiplier feature element on connect; `ticksPerStep` adjusts automatically
-- **Accessibility prompt** — requests permission on launch; shows `⚠` badge if not granted
+```json
+{
+  "version": 1,
+  "holdThresholdMs": 200,
+  "stepsPerRotation": 20,
+  "overlay": {
+    "enabled": true,
+    "position": "cursor"
+  },
+  "haptics": {
+    "enabled": true,
+    "events": {
+      "detent":    { "waveform": "click", "intensity": 60, "repeat": 0 },
+      "modeSwitch": { "waveform": "buzz",  "intensity": 90, "repeat": 0 }
+    }
+  },
+  "defaultProfile": {
+    "mode": "volume",
+    "volume": { "stepSize": 5 },
+    "shortcuts": [
+      { "action": "rotate", "keys": ["cmd", "z"],          "label": "Undo" },
+      { "action": "press",  "keys": ["cmd", "shift", "z"], "label": "Redo" }
+    ]
+  },
+  "appProfiles": {
+    "com.apple.Music": {
+      "mode": "shortcut",
+      "shortcuts": [
+        { "action": "rotate_cw",  "keys": ["cmd", "right"], "label": "Next Track" },
+        { "action": "rotate_ccw", "keys": ["cmd", "left"],  "label": "Previous Track" },
+        { "action": "press",      "keys": ["space"],        "label": "Play / Pause" }
+      ],
+      "overlaySegments": [
+        { "glyph": "⏮", "label": "Previous",   "shortcuts": [{ "action": "select", "keys": ["cmd", "left"],  "label": "Previous Track" }] },
+        { "glyph": "⏯", "label": "Play/Pause", "shortcuts": [{ "action": "select", "keys": ["space"],        "label": "Play / Pause" }] },
+        { "glyph": "⏭", "label": "Next",       "shortcuts": [{ "action": "select", "keys": ["cmd", "right"], "label": "Next Track" }] }
+      ]
+    }
+  }
+}
+```
 
-### Implemented but not yet active
+### Shortcut action types
 
-- **Scroll** — `ScrollAction` is implemented (CGEvent scroll wheel via `postToPid`) but not wired to the event loop pending a fix for event delivery to non-focused windows
+| Action | Fires when |
+|---|---|
+| `rotate` | Any rotation step (both directions) |
+| `rotate_cw` | Clockwise rotation only |
+| `rotate_ccw` | Counterclockwise rotation only |
+| `press` | Tap (short press and release) |
+| `select` | Overlay segment committed |
 
 ---
 
@@ -123,98 +242,58 @@ Haptic output uses HID Report ID 1 (output type) on the SimpleHapticsController 
 
 ```
 Sources/DialKit/
-├── main.swift                    entry point, bootstrap wiring
+├── main.swift                       entry point, pipeline wiring
 ├── Device/
-│   ├── DialDevice.swift          protocol + DialEvent enum
-│   ├── SurfaceDialDriver.swift   IOHIDManager driver, haptic output
-│   ├── DeviceManager.swift       stub — multi-device scanning
-│   └── DeviceRegistry.swift      VID/PID → driver factory list
+│   ├── DialDevice.swift             protocol + DialEvent enum
+│   ├── SurfaceDialDriver.swift      IOHIDManager driver, haptic output
+│   ├── DeviceManager.swift          owns driver + haptic engine, reconnect
+│   └── DeviceRegistry.swift         VID/PID → driver factory list
 ├── Input/
-│   ├── InputInterpreter.swift    hold state machine, tick accumulation
+│   ├── InputInterpreter.swift       hold state machine, tick accumulation
 │   ├── HoldGestureRecogniser.swift  200ms hold timer
-│   └── ActionEventBus.swift      AsyncStream fan-out bus
+│   └── ActionEventBus.swift         AsyncStream fan-out bus
 ├── Actions/
-│   ├── VolumeAction.swift        CoreAudio + media key fallback
-│   ├── ScrollAction.swift        CGEvent scroll wheel
-│   └── ShortcutAction.swift      stub — CGEvent keystroke synthesis
+│   ├── VolumeAction.swift           CoreAudio + media key fallback
+│   ├── ScrollAction.swift           CGEvent scroll wheel (line + pixel fallback)
+│   └── ShortcutAction.swift         CGEvent keystroke synthesis
 ├── Routing/
-│   ├── Mode.swift                scroll / volume / shortcut enum
-│   ├── ModeRouter.swift          stub — app-aware mode switching
-│   └── AppWatcher.swift          stub — NSWorkspace active app monitor
+│   ├── Mode.swift                   scroll / volume / shortcut enum
+│   ├── ModeRouter.swift             app-aware mode dispatch, user vs profile mode
+│   └── AppWatcher.swift             NSWorkspace active app monitor
 ├── Config/
-│   ├── ConfigStore.swift         stub — ~/.config/dialkit/profiles.json
-│   ├── AppProfile.swift          stub — per-bundle-ID profile
-│   ├── HapticConfig.swift        per-event waveform/intensity overrides
-│   └── OverlayConfig.swift       stub — overlay position/timeout settings
+│   ├── ConfigStore.swift            load/save/watch ~/.config/dialkit/profiles.json
+│   ├── AppProfile.swift             per-bundle-ID profile + overlay segments
+│   ├── HapticConfig.swift           per-event waveform/intensity settings
+│   └── OverlayConfig.swift          overlay position/timeout settings
 ├── Overlay/
-│   ├── OverlayController.swift   stub — show/hide state machine
-│   ├── OverlayPanel.swift        stub — floating NSPanel
-│   ├── RadialMenuView.swift      stub — CoreGraphics radial segments
-│   └── RadialMenuModel.swift     stub — segment data + highlighted index
+│   ├── OverlayController.swift      show/hide state machine, segment swapping
+│   ├── OverlayPanel.swift           floating NSPanel, screenSaver level
+│   ├── RadialMenuView.swift         CoreGraphics radial segments + animations
+│   ├── RadialMenuModel.swift        segment data, SegmentAction enum
+│   └── ValueHUDController.swift     frosted-glass live-value / shortcut HUD
 ├── Haptics/
-│   ├── HapticEngine.swift        protocol + HapticEvent enum
-│   ├── SurfaceDialHapticEngine.swift  HID output report driver
-│   ├── NullHapticEngine.swift    no-op for non-haptic devices
-│   └── HapticEventMap.swift      HapticEvent → waveform ordinal/intensity
+│   ├── HapticEngine.swift           protocol + HapticEvent enum
+│   ├── SurfaceDialHapticEngine.swift HID output report driver
+│   ├── NullHapticEngine.swift       no-op for non-haptic devices
+│   └── HapticEventMap.swift         HapticEvent → waveform ordinal/intensity
 └── UI/
-    └── MenuBarController.swift   NSStatusItem + NSMenu
-```
-
----
-
-## Configuration
-
-Configuration will live at `~/.config/dialkit/profiles.json` (not yet implemented). Planned schema:
-
-```json
-{
-  "version": 1,
-  "defaultProfile": {
-    "mode": "volume",
-    "volume": { "stepSize": 2 }
-  },
-  "appProfiles": {
-    "com.adobe.Photoshop": {
-      "mode": "shortcuts",
-      "shortcuts": [
-        { "action": "rotate", "keys": ["cmd", "z"], "label": "Undo" }
-      ]
-    }
-  }
-}
+    ├── MenuBarController.swift      NSStatusItem + NSMenu
+    └── PreferencesWindowController.swift  programmatic AppKit preferences
 ```
 
 ---
 
 ## Roadmap
 
-### Next up
+- **Launch at login** — `SMAppService` registration (requires `.app` bundle)
+- **`.app` bundle** — proper bundle packaging with `LSUIElement = true`
+- **Active profile name in menu bar** — show app name or "Default" as a disabled label
+- **Shortcut editor in preferences** — add/edit key bindings without touching JSON
+- **Griffin PowerMate BT** — driver abstraction already in place, needs a driver
 
-- **ModeRouter + AppWatcher** — automatically switch between scroll/volume/shortcut modes based on the active app. Reads app-specific profiles from `ConfigStore`.
-- **ConfigStore** — load/save/watch `~/.config/dialkit/profiles.json`. File watcher via `DispatchSource` so changes apply without restarting.
+### Out of scope for v1
 
-### Overlay
-
-- **RadialMenuView** — CoreGraphics radial menu drawn in an `NSVisualEffectView` panel. Three equal segments (120° each) showing the three modes with icon, label, and live value.
-- **OverlayPanel** — floating `NSPanel` at `.screenSaver` level, non-activating, transparent background.
-- **OverlayController** — animates show/hide (scale + opacity), positions at cursor or fixed corner, handles segment highlight as the dial rotates.
-
-### Shortcuts
-
-- **ShortcutAction** — CGEvent keystroke synthesis. Requires Accessibility. Per-app shortcut profiles configurable in `profiles.json`.
-
-### Polish
-
-- Fix scroll event delivery to non-focused windows (CGEvent `postToPid` with Accessibility currently delivers to cursor position; needs investigation for reliable cross-app delivery)
-- Haptics fine-tuning per event type
-- Menu bar icon badge for device disconnected state
-- DeviceManager for automatic reconnection and multi-device support
-- Launch at login via `SMAppService` (macOS 13+)
-- Universal binary release build + `.app` bundle packaging
-
-### Future / out of scope for v1
-
-- GUI preferences panel
+- GUI preferences for overlay segments (edit `profiles.json` directly)
 - iCloud profile sync
-- Griffin PowerMate BT support (driver abstraction already in place)
 - On-screen dial placement detection
+- Windows / Linux support

@@ -15,6 +15,9 @@ final class SurfaceDialHapticEngine: HapticEngine {
 
     let isSupported = true
 
+    /// Set to false to suppress all haptic output without changing the wiring.
+    var isEnabled: Bool = true
+
     private let driver: any HapticDialDevice
     private var eventMap: HapticEventMap
 
@@ -29,6 +32,7 @@ final class SurfaceDialHapticEngine: HapticEngine {
     // MARK: - HapticEngine
 
     func play(_ event: HapticEvent) async {
+        guard isEnabled else { return }
         let params = eventMap.resolve(event)
 
         // Retrigger throttle: skip if fired too recently.

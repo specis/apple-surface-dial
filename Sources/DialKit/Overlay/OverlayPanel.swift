@@ -1,27 +1,51 @@
 // OverlayPanel.swift
-// NSPanel subclass configured as a non-activating, transparent floating window.
-//
-// Panel configuration:
-//   level              = .screenSaver  (configurable; shows above full-screen apps)
-//   styleMask          = .nonactivatingPanel
-//   ignoresMouseEvents = true
-//   isOpaque           = false
-//   backgroundColor    = .clear
-//   hasShadow          = false
-//
-// Content is wrapped in NSVisualEffectView:
-//   material     = .hudWindow
-//   blendingMode = .behindWindow
-//   state        = .active
+// Non-activating, transparent NSPanel that hosts RadialMenuView.
 
 import AppKit
 
 // MARK: - OverlayPanel
 
-/// Transparent, non-activating NSPanel that hosts the RadialMenuView.
 final class OverlayPanel: NSPanel {
-    // TODO: Override init to apply all panel configuration flags.
-    // TODO: Add NSVisualEffectView as the content view.
-    // TODO: Add RadialMenuView as a subview of the effect view.
-    // TODO: Expose a method to update the window level from OverlayConfig.windowLevel.
+
+    let menuView: RadialMenuView
+
+    init(size: CGFloat = 290) {
+        let frame = NSRect(x: 0, y: 0, width: size, height: size)
+        menuView = RadialMenuView(frame: NSRect(x: 0, y: 0, width: size, height: size))
+
+        super.init(
+            contentRect: frame,
+            styleMask:   [.nonactivatingPanel, .borderless],
+            backing:     .buffered,
+            defer:       false
+        )
+
+        level              = .screenSaver
+        ignoresMouseEvents = true
+        isOpaque           = false
+        backgroundColor    = .clear
+        hasShadow          = false
+        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+        // Frosted glass background
+        let effect = NSVisualEffectView(frame: NSRect(x: 0, y: 0, width: size, height: size))
+        effect.material     = .hudWindow
+        effect.blendingMode = .behindWindow
+        effect.state        = .active
+        effect.wantsLayer   = true
+        effect.layer?.cornerRadius = size / 2
+        effect.layer?.masksToBounds = true
+
+        effect.addSubview(menuView)
+        contentView = effect
+    }
+
+    /// Update the window level from a config string.
+    func applyWindowLevel(_ levelString: String) {
+        switch levelString {
+        case "floating":    level = .floating
+        case "normal":      level = .normal
+        default:            level = .screenSaver
+        }
+    }
 }

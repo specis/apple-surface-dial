@@ -32,6 +32,18 @@ struct VolumeConfig: Codable {
     var stepSize: Int
 }
 
+// MARK: - AppOverlaySegment
+
+/// A single custom segment in the radial overlay menu for a specific app profile.
+struct AppOverlaySegment: Codable {
+    /// Glyph shown in the segment (e.g. "⏮", "⏯", "⏭").
+    var glyph: String
+    /// Label shown below the glyph.
+    var label: String
+    /// Shortcuts fired when this segment is committed.
+    var shortcuts: [ShortcutDefinition]
+}
+
 // MARK: - AppProfile
 
 /// The full configuration for a specific app (or the default profile).
@@ -40,4 +52,6 @@ struct AppProfile: Codable {
     var scroll: ScrollConfig?
     var volume: VolumeConfig?
     var shortcuts: [ShortcutDefinition]?
+    /// Custom radial menu segments. When set, replaces the default Scroll/Volume/Shortcuts layout.
+    var overlaySegments: [AppOverlaySegment]?
 }

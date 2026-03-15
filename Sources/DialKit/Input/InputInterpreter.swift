@@ -13,12 +13,20 @@
 // rotation still registers — steps emit only when a full threshold is crossed.
 
 import Foundation
+import OSLog
 
 // MARK: - InputInterpreter
 
 /// Translates raw DialEvents into higher-level ActionEvents.
 /// Not thread-safe — all state mutations happen on the main thread via MainActor.run.
 final class InputInterpreter {
+
+    // MARK: - Connection callbacks
+
+    /// Called on the main thread when the device physically connects or reconnects.
+    var onDeviceConnected: (() -> Void)?
+    /// Called on the main thread when the device physically disconnects.
+    var onDeviceDisconnected: (() -> Void)?
 
     // MARK: - Configuration
 
@@ -77,8 +85,15 @@ final class InputInterpreter {
 
     private func handle(_ event: DialEvent) {
         switch event {
-        case .connected, .disconnected:
-            break  // DeviceManager will handle these later.
+        case .connected:
+            Log.device.info("InputInterpreter: device connected")
+            state = .idle
+            tickAccumulator = 0
+            onDeviceConnected?()
+        case .disconnected:
+            Log.device.warning("InputInterpreter: device disconnected — waiting for reconnect")
+            state = .idle
+            onDeviceDisconnected?()
         case .pressed:
             handlePressed()
         case .released:
@@ -93,6 +108,7 @@ final class InputInterpreter {
     private func handlePressed() {
         guard state == .idle else { return }
         state = .held
+        Log.input.debug("State: idle → held")
         holdRecogniser.pressDown()
     }
 
@@ -101,12 +117,12 @@ final class InputInterpreter {
         case .idle:
             break
         case .held:
-            // pressUp() will trigger onResult(.tap) synchronously (timer not yet fired)
-            // or do nothing if hold was already confirmed.
             holdRecogniser.pressUp()
             state = .idle
+            Log.input.debug("State: held → idle (tap)")
         case .menuOpen:
             let index = segmentIndex(for: menuAngleDeg, segmentCount: 3)
+            Log.input.info("Menu commit — segment \(index) (angle \(String(format: "%.1f", self.menuAngleDeg))°)")
             bus.post(.menuCommit(segmentIndex: index))
             state = .idle
             cancelInactivityTimer()
@@ -116,15 +132,16 @@ final class InputInterpreter {
     private func handleRotated(delta: Int) {
         switch state {
         case .idle, .held:
-            // Accumulate ticks; emit once a full step threshold is crossed.
             tickAccumulator += delta
             let steps = tickAccumulator / ticksPerStep
             if steps != 0 {
                 tickAccumulator -= steps * ticksPerStep
+                Log.input.debug("Rotated \(steps) step(s) (accumulator remainder: \(self.tickAccumulator))")
                 bus.post(.rotated(steps: steps))
             }
         case .menuOpen:
             menuAngleDeg += Double(delta) / Double(device.resolution) * 360.0
+            Log.input.debug("Menu rotation — cumulative angle \(String(format: "%.1f", self.menuAngleDeg))°")
             bus.post(.menuRotated(delta: delta))
             resetInactivityTimer()
         }
@@ -134,11 +151,13 @@ final class InputInterpreter {
         switch result {
         case .tap:
             state = .idle
+            Log.input.info("Gesture: tap")
             bus.post(.tap)
         case .holdConfirmed:
             state = .menuOpen
             menuAngleDeg = 0
             tickAccumulator = 0
+            Log.input.info("State: held → menuOpen (hold confirmed)")
             bus.post(.holdConfirmed)
             resetInactivityTimer()
         }
