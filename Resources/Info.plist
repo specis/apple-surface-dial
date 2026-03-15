@@ -2,17 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Hides the app from the Dock. DialKit runs as a menu bar daemon only. -->
-    <key>LSUIElement</key>
-    <true/>
-
-    <!-- Required for Bluetooth HID access (IOKit will prompt on first open). -->
-    <key>NSBluetoothAlwaysUsageDescription</key>
-    <string>DialKit needs Bluetooth access to communicate with your Surface Dial.</string>
-
-    <!-- Required if Input Monitoring entitlement is needed for HID access. -->
-    <key>NSAppleEventsUsageDescription</key>
-    <string>DialKit uses Apple Events to send keyboard shortcuts on your behalf.</string>
+    <key>CFBundleExecutable</key>
+    <string>DialKit</string>
 
     <key>CFBundleIdentifier</key>
     <string>com.dialkit.DialKit</string>
@@ -20,10 +11,37 @@
     <key>CFBundleName</key>
     <string>DialKit</string>
 
+    <key>CFBundleDisplayName</key>
+    <string>DialKit</string>
+
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+
     <key>CFBundleVersion</key>
     <string>1</string>
 
-    <key>CFBundleShortVersionString</key>
-    <string>0.1.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+
+    <!-- Hides the app from the Dock — runs as a menu bar daemon only -->
+    <key>LSUIElement</key>
+    <true/>
+
+    <!-- Required for Bluetooth HID access — IOKit prompts on first open -->
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>DialKit needs Bluetooth access to communicate with your Surface Dial.</string>
+
+    <!-- Required for synthesising keyboard shortcuts via Accessibility -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>DialKit uses Apple Events to send keyboard shortcuts on your behalf.</string>
+
+    <key>NSHumanReadableCopyright</key>
+    <string>© 2025 DialKit. All rights reserved.</string>
 </dict>
 </plist>

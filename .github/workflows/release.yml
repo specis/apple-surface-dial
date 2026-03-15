@@ -1,0 +1,77 @@
+name: Release
+
+# Triggers on version tags: git tag v1.0.0 && git push origin v1.0.0
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    name: Build, sign, notarize, and publish
+    runs-on: macos-14   # Apple Silicon runner
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Extract version from tag ─────────────────────────────────────────────
+      - name: Set version
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}   # strip leading 'v'
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Building DialKit $VERSION"
+
+      # ── Import Developer ID certificate ─────────────────────────────────────
+      # Store your .p12 as a base64 secret:
+      #   base64 -i YourCert.p12 | pbcopy  → paste as DEVELOPER_ID_CERT
+      - name: Import certificate
+        env:
+          DEVELOPER_ID_CERT:     ${{ secrets.DEVELOPER_ID_CERT }}
+          DEVELOPER_ID_CERT_PWD: ${{ secrets.DEVELOPER_ID_CERT_PWD }}
+        run: |
+          KEYCHAIN=build.keychain
+          security create-keychain -p "" $KEYCHAIN
+          security set-keychain-settings -lut 21600 $KEYCHAIN
+          security unlock-keychain -p "" $KEYCHAIN
+          echo "$DEVELOPER_ID_CERT" | base64 --decode > cert.p12
+          security import cert.p12 \
+            -k $KEYCHAIN \
+            -P "$DEVELOPER_ID_CERT_PWD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "" $KEYCHAIN
+          security list-keychains -s $KEYCHAIN
+          rm cert.p12
+
+      # ── Store notarytool credentials ─────────────────────────────────────────
+      # Requires: APPLE_ID, APP_SPECIFIC_PASSWORD, TEAM_ID secrets
+      - name: Store notarytool credentials
+        env:
+          APPLE_ID:             ${{ secrets.APPLE_ID }}
+          APP_SPECIFIC_PASSWORD: ${{ secrets.APP_SPECIFIC_PASSWORD }}
+          TEAM_ID:              ${{ secrets.TEAM_ID }}
+        run: |
+          xcrun notarytool store-credentials "dialkit-notary" \
+            --apple-id "$APPLE_ID" \
+            --team-id "$TEAM_ID" \
+            --password "$APP_SPECIFIC_PASSWORD"
+
+      # ── Build, sign, notarize, package ───────────────────────────────────────
+      - name: Release
+        env:
+          SIGN_IDENTITY: ${{ secrets.SIGN_IDENTITY }}
+        run: |
+          make release \
+            VERSION=${{ env.VERSION }} \
+            SIGN_IDENTITY="$SIGN_IDENTITY"
+
+      # ── Publish GitHub Release ────────────────────────────────────────────────
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: DialKit ${{ env.VERSION }}
+          draft: true        # review before publishing
+          generate_release_notes: true
+          files: DialKit-${{ env.VERSION }}.dmg
