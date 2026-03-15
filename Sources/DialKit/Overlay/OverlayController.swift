@@ -118,10 +118,14 @@ final class OverlayController {
     // MARK: - Segment math
 
     private func segmentIndex(for angleDeg: Double) -> Int {
-        let arcSize = 360.0 / Double(model.segments.count)
+        let count   = model.segments.count
+        let arcSize = 360.0 / Double(count)
         let normalised = angleDeg.truncatingRemainder(dividingBy: 360)
         let positive = normalised < 0 ? normalised + 360 : normalised
-        return Int(positive / arcSize) % model.segments.count
+        let raw = Int(positive / arcSize) % count
+        // Segments are drawn counterclockwise in CG space; mirror the index so
+        // clockwise physical rotation selects segments in clockwise visual order.
+        return (count - raw) % count
     }
 
     // MARK: - Positioning
