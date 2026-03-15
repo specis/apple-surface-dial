@@ -26,8 +26,10 @@ final class SurfaceDialDriver: DialDevice, HapticDialDevice {
     let name = "Microsoft Surface Dial"
     let vendorID = 0x045E
     let productID = 0x091B
-    /// 3600 ticks per full rotation.
-    let resolution = 3600
+    /// Ticks per full 360° revolution, read from the device's Resolution Multiplier
+    /// feature element (HID Page 1, Usage 0x48) after connection.
+    /// Falls back to 360 if the feature report is unavailable.
+    private(set) var resolution: Int = 360
 
     // Strong reference to the matched HID device (shared with SurfaceDialHapticEngine later).
     private(set) var hidDevice: IOHIDDevice?
@@ -104,10 +106,38 @@ final class SurfaceDialDriver: DialDevice, HapticDialDevice {
         continuation?.finish()
     }
 
+    // MARK: - Private — resolution multiplier
+
+    /// Reads the Resolution Multiplier feature element (Generic Desktop, Usage 0x48)
+    /// which reports the device's ticks-per-revolution. Updates `resolution` if found.
+    private func readResolutionMultiplier(from device: IOHIDDevice) {
+        let matching: [String: Any] = [
+            kIOHIDElementUsagePageKey: 1,   // Generic Desktop
+            kIOHIDElementUsageKey:    72,   // Resolution Multiplier (0x48)
+        ]
+        guard let cfArr = IOHIDDeviceCopyMatchingElements(
+                device, matching as CFDictionary, IOOptionBits(kIOHIDOptionsTypeNone)),
+              let elements = cfArr as? [IOHIDElement] else { return }
+
+        for element in elements {
+            guard IOHIDElementGetType(element) == kIOHIDElementTypeFeature else { continue }
+            var valueRef = Unmanaged<IOHIDValue>.passRetained(IOHIDValueCreateWithIntegerValue(
+                kCFAllocatorDefault, element, 0, 0))
+            guard IOHIDDeviceGetValue(device, element, &valueRef) == kIOReturnSuccess else { continue }
+            let multiplier = Int(IOHIDValueGetIntegerValue(valueRef.takeRetainedValue()))
+            if multiplier > 0 {
+                resolution = multiplier
+                print("Device resolution: \(multiplier) ticks/revolution")
+                return
+            }
+        }
+    }
+
     // MARK: - Private — device matched
 
     private func deviceMatched(_ device: IOHIDDevice) {
         hidDevice = device
+        readResolutionMultiplier(from: device)
         continuation?.yield(.connected)
 
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
@@ -149,11 +179,37 @@ final class SurfaceDialDriver: DialDevice, HapticDialDevice {
     // MARK: - HapticDialDevice (stubbed — not needed for smoke test)
 
     func playHaptic(waveformOrdinal: Int, intensity: Float, repeatCount: Int) {
-        // TODO: Build and send HID output report via IOHIDDeviceSetReport().
+        guard let device = hidDevice else { return }
+
+        // SimpleHapticsController output report — Surface Dial (HID Page 0x0E, Usage 0x01).
+        // Report ID 1. Byte layout from HID descriptor (ioreg analysis):
+        //   [0]: RetriggerPeriod (8-bit, 0 = one-shot / no retrigger)
+        //   [1]: AutoTriggerAssociatedControl (8-bit, 1 = manual trigger)
+        //   [2]: WaveformVendorPage low byte (uint16 LE — ordinal into WaveformList)
+        //   [3]: WaveformVendorPage high byte
+        //
+        // WaveformList ordinals (from Feature Report 2):
+        //   3 = Click, 4 = Buzz Continuous, 5 = (third waveform)
+        var report: [UInt8] = [
+            0x00,                                    // RetriggerPeriod: 0 = one-shot
+            0x01,                                    // AutoTriggerAssociatedControl: 1
+            UInt8(waveformOrdinal & 0xFF),           // Waveform ordinal low byte
+            UInt8((waveformOrdinal >> 8) & 0xFF),    // Waveform ordinal high byte
+        ]
+        IOHIDDeviceSetReport(
+            device,
+            kIOHIDReportTypeOutput,
+            CFIndex(1),  // Report ID
+            &report,
+            CFIndex(report.count)
+        )
     }
 
     func setAutoTrigger(enabled: Bool) {
-        // TODO: Enable or disable the device's built-in auto-trigger haptics.
+        // The Surface Dial auto-triggers haptic detents by default.
+        // Sending a feature report to Page 0x0E with AutoTrigger=0 disables this
+        // so the host takes full control. Not implemented yet — detent haptics
+        // currently rely on the device's built-in auto-trigger behaviour.
     }
 }
 

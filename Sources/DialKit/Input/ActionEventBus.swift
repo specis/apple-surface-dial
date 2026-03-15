@@ -1,8 +1,10 @@
 // ActionEventBus.swift
-// NotificationCenter / AsyncStream bridge for interpreted dial actions.
+// Distributes ActionEvents to multiple independent subscribers.
 //
-// OverlayController and HapticEngine subscribe to this bus independently.
-// Action handlers (ScrollAction, VolumeAction, ShortcutAction) post events here.
+// Multiple components subscribe (OverlayController, HapticEngine, action handlers)
+// and each receive every event independently via their own AsyncStream.
+//
+// Not thread-safe — post() and observe() must be called on the main thread.
 
 import Foundation
 
@@ -27,11 +29,31 @@ enum ActionEvent {
 
 // MARK: - ActionEventBus
 
-/// Thin wrapper around NotificationCenter for posting and observing ActionEvents.
+/// Fan-out event bus. Each call to observe() returns an independent AsyncStream
+/// that receives all future events posted to the bus.
 final class ActionEventBus {
-    // TODO: Define a Notification.Name for each ActionEvent category or use a single name
-    //       with the event encoded in userInfo.
-    // TODO: Provide a post(_ event: ActionEvent) method.
-    // TODO: Provide an observe() -> AsyncStream<ActionEvent> method for subscribers.
-    // TODO: Consider thread-safety (all posts on main actor or a dedicated queue).
+
+    private var continuations: [UUID: AsyncStream<ActionEvent>.Continuation] = [:]
+
+    /// Delivers event to all current subscribers.
+    func post(_ event: ActionEvent) {
+        for continuation in continuations.values {
+            continuation.yield(event)
+        }
+    }
+
+    /// Returns a new AsyncStream that receives every future event.
+    /// The stream ends when the bus is deallocated or the stream is cancelled.
+    func observe() -> AsyncStream<ActionEvent> {
+        let id = UUID()
+        // AsyncStream calls the closure synchronously, so capturedCont is set
+        // before the assignment on the next line.
+        var capturedCont: AsyncStream<ActionEvent>.Continuation!
+        let stream = AsyncStream<ActionEvent> { capturedCont = $0 }
+        continuations[id] = capturedCont
+        capturedCont.onTermination = { [weak self] _ in
+            DispatchQueue.main.async { self?.continuations.removeValue(forKey: id) }
+        }
+        return stream
+    }
 }

@@ -2,32 +2,160 @@
 // NSStatusItem and NSMenu for the DialKit menu bar presence.
 //
 // NSMenu structure:
-//   Current mode        (disabled label — active mode name)
-//   Active profile      (disabled label — app name or "Default")
-//   ─────────────────────────────────────────────────────────
-//   Mode submenu →      Scroll / Volume / Shortcuts (checkmark on active)
-//   ─────────────────────────────────────────────────────────
-//   Open Config File    → NSWorkspace.open(configFileURL)
-//   Haptics: Enabled    (toggle; greyed out if device has no haptics)
-//   ─────────────────────────────────────────────────────────
+//   Mode: Volume         (disabled label)
+//   ───────────────────────────────────────
+//   Mode ▶               Scroll ✓ / Volume ✓ / Shortcuts ✓
+//   ───────────────────────────────────────
+//   Haptics: Enabled     (toggle; disabled if device has no haptics)
+//   ───────────────────────────────────────
 //   About DialKit
-//   Quit
-//
-// No Dock icon: LSUIElement = true in Info.plist.
-// Warning badge: shown when Accessibility is not granted and a shortcut profile is active.
+//   Quit DialKit         ⌘Q
 
 import AppKit
-import Foundation
 
 // MARK: - MenuBarController
 
-/// Manages the NSStatusItem and its associated NSMenu.
 final class MenuBarController {
-    // TODO: Create NSStatusItem with dial icon (SF Symbol "dial.medium" or template image).
-    // TODO: Build the NSMenu with the structure described above.
-    // TODO: Update the "Current mode" and "Active profile" labels when state changes.
-    // TODO: Show/hide an Accessibility warning badge (e.g. "⚠" appended to icon).
-    // TODO: Wire "Mode submenu" items to ModeRouter.currentMode changes.
-    // TODO: Wire "Haptics: Enabled" toggle to HapticEngine.isSupported and ConfigStore.
-    // TODO: Wire "Open Config File" to NSWorkspace.open with the config file URL.
+
+    // MARK: - Public state
+
+    /// Current dial mode. Updates the mode label and checkmarks.
+    var currentMode: Mode = .volume {
+        didSet { updateModeItems() }
+    }
+
+    /// Whether haptic feedback is currently enabled.
+    var hapticsEnabled: Bool = true {
+        didSet { updateHapticsItem() }
+    }
+
+    /// False when the connected device doesn't support haptics — greys out the toggle.
+    var hapticsAvailable: Bool = true {
+        didSet { updateHapticsItem() }
+    }
+
+    /// Called when the user picks a mode from the menu.
+    var onModeChange: ((Mode) -> Void)?
+
+    /// Called when the user toggles haptics.
+    var onHapticsToggle: ((Bool) -> Void)?
+
+    // MARK: - Private
+
+    private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    private let modeLabel  = NSMenuItem()
+    private let hapticsItem = NSMenuItem()
+    private var modeItems: [Mode: NSMenuItem] = [:]
+
+    // MARK: - init
+
+    init(accessibilityGranted: Bool = true) {
+        buildMenu()
+        updateIcon(accessibilityGranted: accessibilityGranted)
+    }
+
+    // MARK: - Public
+
+    func setAccessibilityGranted(_ granted: Bool) {
+        updateIcon(accessibilityGranted: granted)
+    }
+
+    // MARK: - Private — icon
+
+    private func updateIcon(accessibilityGranted: Bool) {
+        guard let button = statusItem.button else { return }
+        if let img = NSImage(systemSymbolName: "dial.medium", accessibilityDescription: "DialKit") {
+            img.isTemplate = true
+            button.image = img
+            button.title = accessibilityGranted ? "" : " ⚠"
+        } else {
+            button.title = accessibilityGranted ? "◎" : "◎ ⚠"
+        }
+    }
+
+    // MARK: - Private — menu construction
+
+    private func buildMenu() {
+        let menu = NSMenu()
+
+        // Mode label (non-interactive header)
+        modeLabel.isEnabled = false
+        menu.addItem(modeLabel)
+
+        menu.addItem(.separator())
+
+        // Mode submenu
+        let modeSubmenu = NSMenu(title: "Mode")
+        for mode in Mode.allCases {
+            let item = NSMenuItem(
+                title: mode.displayName,
+                action: #selector(modeItemSelected(_:)),
+                keyEquivalent: ""
+            )
+            item.target = self
+            item.representedObject = mode
+            modeSubmenu.addItem(item)
+            modeItems[mode] = item
+        }
+        let modeParent = NSMenuItem(title: "Mode", action: nil, keyEquivalent: "")
+        modeParent.submenu = modeSubmenu
+        menu.addItem(modeParent)
+
+        menu.addItem(.separator())
+
+        // Haptics toggle
+        hapticsItem.target = self
+        hapticsItem.action = #selector(toggleHaptics)
+        menu.addItem(hapticsItem)
+
+        menu.addItem(.separator())
+
+        // About
+        let about = NSMenuItem(title: "About DialKit", action: #selector(showAbout), keyEquivalent: "")
+        about.target = self
+        menu.addItem(about)
+
+        // Quit
+        menu.addItem(NSMenuItem(
+            title: "Quit DialKit",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        ))
+
+        statusItem.menu = menu
+
+        updateModeItems()
+        updateHapticsItem()
+    }
+
+    // MARK: - Private — dynamic updates
+
+    private func updateModeItems() {
+        modeLabel.title = "Mode: \(currentMode.displayName)"
+        for (mode, item) in modeItems {
+            item.state = mode == currentMode ? .on : .off
+        }
+    }
+
+    private func updateHapticsItem() {
+        hapticsItem.title   = "Haptics: \(hapticsEnabled ? "Enabled" : "Disabled")"
+        hapticsItem.isEnabled = hapticsAvailable
+    }
+
+    // MARK: - Actions
+
+    @objc private func modeItemSelected(_ sender: NSMenuItem) {
+        guard let mode = sender.representedObject as? Mode else { return }
+        currentMode = mode
+        onModeChange?(mode)
+    }
+
+    @objc private func toggleHaptics() {
+        hapticsEnabled.toggle()
+        onHapticsToggle?(hapticsEnabled)
+    }
+
+    @objc private func showAbout() {
+        NSApplication.shared.orderFrontStandardAboutPanel(nil)
+    }
 }

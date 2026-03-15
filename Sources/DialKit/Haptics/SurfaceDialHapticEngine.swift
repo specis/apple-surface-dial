@@ -1,33 +1,53 @@
 // SurfaceDialHapticEngine.swift
-// HapticEngine implementation that sends HID output reports to the Surface Dial.
+// HapticEngine implementation that drives Surface Dial haptics via HID output reports.
 //
-// Sends IOHIDDeviceSetReport() with report type .output targeting the
-// SimpleHapticsController collection (HID Page 0x0E, Usage 0x01).
-//
-// Shares the IOHIDDeviceRef held by SurfaceDialDriver.
+// Calls HapticDialDevice.playHaptic() — the driver owns the IOHIDDevice reference
+// and handles the actual IOHIDDeviceSetReport call.
 
-import IOKit
-import IOKit.hid
 import Foundation
 
 // MARK: - SurfaceDialHapticEngine
 
-/// Concrete HapticEngine that drives Surface Dial haptics via HID output reports.
+/// Concrete HapticEngine for the Surface Dial.
+/// Resolves semantic HapticEvents to waveform params via HapticEventMap and
+/// forwards them to the device driver.
 final class SurfaceDialHapticEngine: HapticEngine {
 
     let isSupported = true
 
-    // TODO: Accept a weak/unowned reference to the IOHIDDeviceRef from SurfaceDialDriver.
-    // TODO: Hold a HapticEventMap for resolving HapticEvent → HapticParams.
-    // TODO: Implement play(_ event:) — resolve params, build HID report, call IOHIDDeviceSetReport.
-    // TODO: Implement configure(with:) — rebuild HapticEventMap from new config.
-    // TODO: Respect retriggerMs to prevent over-triggering on rapid detent events.
+    private let driver: any HapticDialDevice
+    private var eventMap: HapticEventMap
+
+    /// Tracks the last time each event was played for retrigger throttling.
+    private var lastPlayed: [String: TimeInterval] = [:]
+
+    init(driver: any HapticDialDevice) {
+        self.driver = driver
+        self.eventMap = HapticEventMap()
+    }
+
+    // MARK: - HapticEngine
 
     func play(_ event: HapticEvent) async {
-        // TODO: Implement.
+        let params = eventMap.resolve(event)
+
+        // Retrigger throttle: skip if fired too recently.
+        if let ms = params.retriggerMs {
+            let key = "\(event)"
+            let now = Date().timeIntervalSinceReferenceDate
+            let minInterval = Double(ms) / 1000.0
+            if let last = lastPlayed[key], now - last < minInterval { return }
+            lastPlayed[key] = now
+        }
+
+        driver.playHaptic(
+            waveformOrdinal: params.waveformOrdinal,
+            intensity:       params.intensity,
+            repeatCount:     params.repeatCount
+        )
     }
 
     func configure(with config: HapticConfig) {
-        // TODO: Implement.
+        eventMap = HapticEventMap(config: config)
     }
 }

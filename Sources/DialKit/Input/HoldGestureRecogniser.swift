@@ -3,6 +3,9 @@
 //
 // Default hold threshold: 200ms (configurable via ConfigStore holdThresholdMs).
 // Emits either .tap (released before threshold) or .holdConfirmed (threshold reached).
+//
+// All methods must be called on the main thread. The onResult callback fires
+// on the main thread (timer dispatches to DispatchQueue.main).
 
 import Foundation
 
@@ -18,9 +21,42 @@ enum HoldGestureResult {
 // MARK: - HoldGestureRecogniser
 
 /// Manages the timer that distinguishes a tap from a hold.
+/// Not thread-safe — all calls must be from the main thread.
 final class HoldGestureRecogniser {
-    // TODO: Accept a holdThreshold (TimeInterval, default 0.2s).
-    // TODO: On pressDown(), start a timer; fire .holdConfirmed when it elapses.
-    // TODO: On pressUp(), cancel the timer and emit .tap if timer hadn't fired.
-    // TODO: Expose result via callback or async continuation.
+
+    var threshold: TimeInterval
+    /// Called exactly once per press-down / press-up cycle with the resolved result.
+    var onResult: ((HoldGestureResult) -> Void)?
+
+    private var pendingWork: DispatchWorkItem?
+    /// Guards against emitting both .tap and .holdConfirmed in the same cycle
+    /// (possible if cancel() races with a workItem that already started).
+    private var resultEmitted = false
+
+    init(threshold: TimeInterval = 0.2) {
+        self.threshold = threshold
+    }
+
+    /// Call when the button is pressed. Starts the hold timer.
+    func pressDown() {
+        resultEmitted = false
+        let item = DispatchWorkItem { [weak self] in
+            guard let self, !self.resultEmitted else { return }
+            self.resultEmitted = true
+            self.pendingWork = nil
+            self.onResult?(.holdConfirmed)
+        }
+        pendingWork = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + threshold, execute: item)
+    }
+
+    /// Call when the button is released. Cancels the hold timer if still pending
+    /// and emits .tap; does nothing if .holdConfirmed was already emitted.
+    func pressUp() {
+        pendingWork?.cancel()
+        pendingWork = nil
+        guard !resultEmitted else { return }
+        resultEmitted = true
+        onResult?(.tap)
+    }
 }
