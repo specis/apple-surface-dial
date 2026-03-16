@@ -5,6 +5,7 @@
 //   1. appProfiles[activeBundleID] if present
 //   2. config.defaultProfile
 
+import AppKit
 import Foundation
 import OSLog
 
@@ -105,9 +106,10 @@ final class ModeRouter {
 
         case .shortcut:
             let direction = steps > 0 ? "rotate_cw" : "rotate_ccw"
-            let defs = (profile.shortcuts ?? []).filter {
+            let candidates = (profile.shortcuts ?? []).filter {
                 $0.action == "rotate" || $0.action == direction
             }
+            let defs = filterByModifiers(candidates)
             Log.router.debug("Dispatch shortcut \(direction) — \(defs.count) binding(s)")
             for _ in 0 ..< abs(steps) {
                 for def in defs { shortcut.fire(definition: def) }
@@ -117,8 +119,9 @@ final class ModeRouter {
 
     private func dispatchTap() {
         guard currentMode == .shortcut else { return }
-        let profile = resolvedProfile()
-        let defs = (profile.shortcuts ?? []).filter { $0.action == "press" }
+        let profile    = resolvedProfile()
+        let candidates = (profile.shortcuts ?? []).filter { $0.action == "press" }
+        let defs       = filterByModifiers(candidates)
         Log.router.debug("Dispatch shortcut press — \(defs.count) binding(s)")
         for def in defs { shortcut.fire(definition: def) }
     }
@@ -134,6 +137,35 @@ final class ModeRouter {
     private func applyVolumeConfig(_ cfg: VolumeConfig?) {
         guard let cfg else { return }
         volume.stepSize = Float(cfg.stepSize) / 100.0
+    }
+
+    // MARK: - Modifier-aware shortcut filtering
+
+    /// Returns the most specific subset of `defs` matching the currently held modifier keys.
+    /// Modifier-specific shortcuts take precedence over base shortcuts when their
+    /// requiredModifiers are all held. Falls back to base shortcuts if none match.
+    private func filterByModifiers(_ defs: [ShortcutDefinition]) -> [ShortcutDefinition] {
+        let flags = NSEvent.modifierFlags
+
+        func isHeld(_ name: String) -> Bool {
+            switch name.lowercased() {
+            case "shift":                return flags.contains(.shift)
+            case "cmd", "command":       return flags.contains(.command)
+            case "opt", "alt", "option": return flags.contains(.option)
+            case "ctrl", "control":      return flags.contains(.control)
+            default: return false
+            }
+        }
+
+        // Prefer entries whose requiredModifiers are all currently held.
+        let specific = defs.filter { def in
+            guard let required = def.requiredModifiers, !required.isEmpty else { return false }
+            return required.allSatisfy { isHeld($0) }
+        }
+        if !specific.isEmpty { return specific }
+
+        // Fall back to base shortcuts (no requiredModifiers or empty).
+        return defs.filter { $0.requiredModifiers == nil || $0.requiredModifiers!.isEmpty }
     }
 
     // MARK: - Profile resolution

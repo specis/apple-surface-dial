@@ -9,12 +9,22 @@ import Foundation
 
 /// A single shortcut binding: a triggering action + key combo + display label.
 struct ShortcutDefinition: Codable {
-    /// The dial action that triggers this shortcut ("rotate" or "press").
+    /// The dial action that triggers this shortcut ("rotate_cw", "rotate_ccw", "press", "select").
     let action: String
-    /// Modifier + key strings (e.g. ["cmd", "z"]).
+    /// Keys synthesised when this shortcut fires (e.g. ["cmd", "z"]).
     let keys: [String]
-    /// Human-readable label shown in the overlay (e.g. "Undo").
+    /// Human-readable label shown in the overlay and HUD.
     let label: String
+    /// Physical modifier keys the user must be holding for this shortcut to fire
+    /// (e.g. ["shift"]). When nil or empty, fires when no relevant modifiers are held.
+    let requiredModifiers: [String]?
+
+    init(action: String, keys: [String], label: String, requiredModifiers: [String]? = nil) {
+        self.action            = action
+        self.keys              = keys
+        self.label             = label
+        self.requiredModifiers = requiredModifiers
+    }
 }
 
 // MARK: - ScrollConfig

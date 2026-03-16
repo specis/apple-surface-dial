@@ -94,6 +94,26 @@ extension DialKitConfig {
                     AppOverlaySegment(glyph: "→",  label: "Next Tab",   shortcuts: [ShortcutDefinition(action: "select", keys: ["cmd", "shift", "]"], label: "Next Tab")]),
                 ]
             ),
+            // DaVinci Resolve — jog frame by frame; hold Shift to jump between edit points
+            "com.blackmagic-design.DaVinciResolve": AppProfile(
+                mode: .shortcut,
+                scroll: nil,
+                volume: nil,
+                shortcuts: [
+                    // Base: frame by frame
+                    ShortcutDefinition(action: "rotate_cw",  keys: ["right"],         label: "Next Frame"),
+                    ShortcutDefinition(action: "rotate_ccw", keys: ["left"],           label: "Prev Frame"),
+                    // Shift held: jump to next/previous edit point
+                    ShortcutDefinition(action: "rotate_cw",  keys: ["shift", "right"], label: "Next Edit Point", requiredModifiers: ["shift"]),
+                    ShortcutDefinition(action: "rotate_ccw", keys: ["shift", "left"],  label: "Prev Edit Point", requiredModifiers: ["shift"]),
+                    ShortcutDefinition(action: "press",      keys: ["space"],          label: "Play / Pause"),
+                ],
+                overlaySegments: [
+                    AppOverlaySegment(glyph: "←",  label: "Prev Frame",   shortcuts: [ShortcutDefinition(action: "select", keys: ["left"],  label: "Previous Frame")]),
+                    AppOverlaySegment(glyph: "⏵",  label: "Play/Pause",   shortcuts: [ShortcutDefinition(action: "select", keys: ["space"], label: "Play / Pause")]),
+                    AppOverlaySegment(glyph: "→",  label: "Next Frame",   shortcuts: [ShortcutDefinition(action: "select", keys: ["right"], label: "Next Frame")]),
+                ]
+            ),
         ]
     )
 }

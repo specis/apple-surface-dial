@@ -69,6 +69,7 @@ Built-in profiles:
 | Safari | Scroll | Scroll page | — |
 | Apple Music | Shortcuts | Previous / Next track | Play/Pause |
 | VSCode | Shortcuts | Previous / Next tab | Quick Open |
+| DaVinci Resolve | Shortcuts | Jog frame-by-frame (Shift = jump edit points) | Play/Pause |
 | Everything else | Volume | Adjust volume | — |
 
 App-profile modes are **temporary** — switching to an unprofiled app reverts to whichever mode you last manually selected.
@@ -219,6 +220,21 @@ Config lives at `~/.config/dialkit/profiles.json`. It is created with sensible d
         { "glyph": "⏯", "label": "Play/Pause", "shortcuts": [{ "action": "select", "keys": ["space"],        "label": "Play / Pause" }] },
         { "glyph": "⏭", "label": "Next",       "shortcuts": [{ "action": "select", "keys": ["cmd", "right"], "label": "Next Track" }] }
       ]
+    },
+    "com.blackmagic-design.DaVinciResolve": {
+      "mode": "shortcut",
+      "shortcuts": [
+        { "action": "rotate_cw",  "keys": ["right"],         "label": "Next Frame" },
+        { "action": "rotate_ccw", "keys": ["left"],           "label": "Prev Frame" },
+        { "action": "rotate_cw",  "keys": ["shift", "right"], "label": "Next Edit Point", "requiredModifiers": ["shift"] },
+        { "action": "rotate_ccw", "keys": ["shift", "left"],  "label": "Prev Edit Point", "requiredModifiers": ["shift"] },
+        { "action": "press",      "keys": ["space"],          "label": "Play / Pause" }
+      ],
+      "overlaySegments": [
+        { "glyph": "←", "label": "Prev Frame",  "shortcuts": [{ "action": "select", "keys": ["left"],  "label": "Previous Frame" }] },
+        { "glyph": "⏵", "label": "Play/Pause",  "shortcuts": [{ "action": "select", "keys": ["space"], "label": "Play / Pause" }] },
+        { "glyph": "→", "label": "Next Frame",  "shortcuts": [{ "action": "select", "keys": ["right"], "label": "Next Frame" }] }
+      ]
     }
   }
 }
@@ -233,6 +249,21 @@ Config lives at `~/.config/dialkit/profiles.json`. It is created with sensible d
 | `rotate_ccw` | Counterclockwise rotation only |
 | `press` | Tap (short press and release) |
 | `select` | Overlay segment committed |
+
+### Modifier-aware shortcuts
+
+Add a `requiredModifiers` array to any shortcut to make it fire only when those physical keys are held. Modifier-specific shortcuts take precedence over base shortcuts when their modifiers are active; if none match, DialKit falls back to base shortcuts (those with no `requiredModifiers`).
+
+Supported modifier names: `shift`, `cmd` / `command`, `opt` / `alt` / `option`, `ctrl` / `control`.
+
+```json
+{ "action": "rotate_cw",  "keys": ["right"],         "label": "Next Frame" },
+{ "action": "rotate_ccw", "keys": ["left"],           "label": "Prev Frame" },
+{ "action": "rotate_cw",  "keys": ["shift", "right"], "label": "Next Edit Point", "requiredModifiers": ["shift"] },
+{ "action": "rotate_ccw", "keys": ["shift", "left"],  "label": "Prev Edit Point", "requiredModifiers": ["shift"] }
+```
+
+When Shift is held, the Shift-variants fire. When Shift is not held, the base `right`/`left` shortcuts fire.
 
 ---
 
