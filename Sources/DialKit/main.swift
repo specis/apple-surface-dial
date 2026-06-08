@@ -74,8 +74,10 @@ appWatcher.onAppActivated = { app in
     overlay.setSegments(profile?.overlaySegments, centreLabel: appName)
 
     // Show a brief HUD with the app name and active mode.
-    let mode = router.currentMode
-    valueHUD.show(glyph: mode.glyph, value: appName, fraction: 1.0)
+    if configStore.config.overlay.enabled && configStore.config.overlay.showModeChanges {
+        let mode = router.currentMode
+        valueHUD.show(glyph: mode.glyph, value: appName, fraction: 1.0)
+    }
 }
 router.setActiveBundleID(appWatcher.activeBundleID)
 
